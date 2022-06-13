@@ -44,11 +44,14 @@ namespace Application.Commands
 
             GetFiles();
 
+            // TODO: need to decide if processing more than one file at a time
             foreach (var file in _files)
             {
                 ReadFile(file);
 
                 PostFile();
+
+                _result.FilesProcessed++;
             }
 
             //TODO: how is file moved so it isnt processed again
@@ -109,8 +112,8 @@ namespace Application.Commands
                     }
                     catch (Exception exception)
                     {
-                        _result.ErrorMessages.Add("Threw an error on line " + lineCount + " - " + exception.Message);
-                        _result.ErrorProcessingFile = true;
+                        _result.ErrorString.Add("Threw an error on line " + lineCount + " - " + exception.Message);
+                        _result.Success = false;
                     }
                 }
             }
@@ -118,7 +121,7 @@ namespace Application.Commands
 
         private void PostFile()
         {
-
+            _result.Success = true;
         }
 
         private string SetAccountReference(IEnumerable<string> row)

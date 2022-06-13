@@ -1,5 +1,4 @@
-﻿using Application.Data;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 
 namespace Application.Result
 {

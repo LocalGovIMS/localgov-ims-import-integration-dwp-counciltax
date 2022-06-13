@@ -37,6 +37,7 @@
 
   <ItemGroup>
     <Folder Include="Commands\" />
+    <Folder Include="TestData\" />
   </ItemGroup>
 
 </Project>
