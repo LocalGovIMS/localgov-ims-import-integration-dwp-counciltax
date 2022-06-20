@@ -23,13 +23,10 @@ namespace Application.Commands
 
         private ImportFileCommandResult _result = new ImportFileCommandResult();
         private string _fileLocation;
-        private string _fileNameStartsWith;
+        private string _fileNameFormat;
         private IEnumerable<string> _files;
-        private string[] _lines;
         private List<ProcessedTransactionModel> _transactions = new List<ProcessedTransactionModel>();
         private Random _randomGenerator = new Random();
-        private decimal _fileTotalAmount;
-        private int _fileTotalTransactionCount;
 
         public ImportFileCommandHandler(
             IConfiguration configuration)
@@ -63,12 +60,12 @@ namespace Application.Commands
         {
             //TODO: is there any validation needed on checking have the right file eg checking name? extension?
             _fileLocation = _configuration.GetValue<string>("FileDetails:Location");
-            _fileNameStartsWith = _configuration.GetValue<string>("FileDetails:FileNameStartsWith");
+            _fileNameFormat = _configuration.GetValue<string>("FileDetails:FileNameFormat");
         }
 
         private void GetFiles()
         {
-            _files = Directory.EnumerateFiles(_fileLocation, _fileNameStartsWith);
+            _files = Directory.EnumerateFiles(_fileLocation, _fileNameFormat);
         }
 
         private void ReadFile(string file)
