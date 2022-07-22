@@ -5,10 +5,11 @@ using System.Threading;
 using System.IO;
 using LocalGovImsApiClient.Model;
 using System;
-using System.Globalization;
 using System.Linq;
 using System.Collections.Generic;
 using OfficeOpenXml;
+using System.IO.Abstractions;
+using Application.Extensions;
 
 namespace Application.Commands
 {
@@ -20,55 +21,85 @@ namespace Application.Commands
     public class ImportFileCommandHandler : IRequestHandler<ImportFileCommand, ImportFileCommandResult>
     {
         private readonly IConfiguration _configuration;
+        private readonly IFileSystem _fileSystem;
+        private readonly LocalGovImsApiClient.Api.ITransactionImportApi _transactionImportApi;
 
-        private ImportFileCommandResult _result = new ImportFileCommandResult();
-        private string _fileLocation;
-        private string _fileNameFormat;
+        private ImportFileCommandResult _result = new();
+        private ImportFileModel _importFileModel = new();
+        private TransactionImportModel _transactionImportModel = new();
         private IEnumerable<string> _files;
-        private List<ProcessedTransactionModel> _transactions = new List<ProcessedTransactionModel>();
-        private Random _randomGenerator = new Random();
 
         public ImportFileCommandHandler(
-            IConfiguration configuration)
+            IConfiguration configuration,
+            IFileSystem file,
+            LocalGovImsApiClient.Api.ITransactionImportApi transactionImportApi)
         {
             _configuration = configuration;
+            _fileSystem = file;
+            _transactionImportApi = transactionImportApi;
         }
 
         public async Task<ImportFileCommandResult> Handle(ImportFileCommand request, CancellationToken cancellationToken)
         {
-            
+            GetTransactionDefaultValues();
+
             GetFileConfiDetails();
 
             GetFiles();
 
-            // TODO: need to decide if processing more than one file at a time
-            foreach (var file in _files)
-            {
-                ReadFile(file);
-
-                PostFile();
-
-                _result.FilesProcessed++;
-            }
+            await ProcessFiles(cancellationToken);
 
             //TODO: how is file moved so it isnt processed again
+
+            SetUpResult();
 
             return _result;
         }
 
+        private void GetTransactionDefaultValues()
+        {
+            _importFileModel.CouncilTaxFundCode = _configuration.GetValue<string>("TransactionDefaultValues:CouncilTaxFundCode");
+            _importFileModel.SuspenseFundCode = _configuration.GetValue<string>("TransactionDefaultValues:SuspenseFundCode");
+            _importFileModel.MopCode = _configuration.GetValue<string>("TransactionDefaultValues:MopCode");
+            _importFileModel.OfficeCode = _configuration.GetValue<string>("TransactionDefaultValues:OfficeCode");
+            _importFileModel.SuspenseVatCode = _configuration.GetValue<string>("TransactionDefaultValues:SuspenseVatCode");
+            _importFileModel.VatCode = _configuration.GetValue<string>("TransactionDefaultValues:VatCode");
+            _importFileModel.TransactionImportTypeId = _configuration.GetValue<int>("TransactionDefaultValues:TransactionImportTypeId");
+            _importFileModel.TransactionImportTypeDescription = _configuration.GetValue<string>("TransactionDefaultValues:TransactionImportTypeDescription");
+            _importFileModel.PSPReferencePrefix = _configuration.GetValue<string>("TransactionDefaultValues:PSPReferencePrefix");
+        }
+
         private void GetFileConfiDetails()
         {
-            //TODO: is there any validation needed on checking have the right file eg checking name? extension?
-            _fileLocation = _configuration.GetValue<string>("FileDetails:Location");
-            _fileNameFormat = _configuration.GetValue<string>("FileDetails:FileNameFormat");
+            _importFileModel.Path = _configuration.GetValue<string>("FileDetails:Path");
+            _importFileModel.SearchPattern = _configuration.GetValue<string>("FileDetails:SearchPattern");
         }
 
         private void GetFiles()
         {
-            _files = Directory.EnumerateFiles(_fileLocation, _fileNameFormat);
+            _files = _fileSystem.Directory.GetFiles(_importFileModel.Path, _importFileModel.SearchPattern);
         }
 
-        private void ReadFile(string file)
+        private async Task ProcessFiles(CancellationToken cancellationToken)
+        {
+            Prepare();
+
+            // TODO: need to decide if processing more than one file at a time
+            foreach (var file in _files)
+            {
+                await ReadFile(file, cancellationToken);
+
+                await PostFileAsync();
+            }
+            //TODO: how is file moved so it isnt processed again
+        }
+
+        private void Prepare()
+        {
+            _transactionImportModel.Initialise();
+        }
+
+        private Task ReadFile(string file, CancellationToken cancellationToken)
         {
             //TODO: are we loading multiple files or just one at a time?
             int lineCount = 0;
@@ -82,44 +113,47 @@ namespace Application.Commands
                 for (int rowNum = 2; rowNum <= totalRows; rowNum++) //selet starting row here
                 {
                     var row = myWorksheet.Cells[rowNum, 1, rowNum, totalColumns].Select(c => c.Value == null ? string.Empty : c.Value.ToString());
-                    var transaction = new ProcessedTransactionModel()
-                    {
-                        OfficeCode = "99",
-                        EntryDate = DateTime.Now,
-                        VatAmount = 0,
-                        VatRate = 0,
-                        UserCode = 0,
-                        Narrative = "DWP",
-                        MopCode = "27"
-                    };
+                    var transaction = new ProcessedTransactionModel();
+                    transaction.SetStaticValues(_importFileModel);
                     try
                     {
                         lineCount++;
-                        //        transaction.Reference = lineCount + GetNextReferenceId(_randomGenerator);
-                        transaction.InternalReference = transaction.Reference;
-                        transaction.PspReference = transaction.Reference;
+                        transaction.PspReference = _importFileModel.PSPReferencePrefix + DateTime.Now.ToString("yyMMddhhmm") + lineCount;
                         transaction.TransactionDate = DateTime.Parse(row.ElementAt(10).Trim());
                         transaction.AccountReference = SetAccountReference(row);
                         transaction.FundCode = SetFundCode(transaction.AccountReference);
                         transaction.Amount = SetAmount(row);
                         transaction.VatCode = SetVatCode(transaction.FundCode);
-                        //       transaction.BatchReference = batchref;  //TODO: is batch reference going
-
-                        _transactions.Add(transaction);
+                        _transactionImportModel.Rows.Add(transaction);
                     }
                     catch (Exception exception)
                     {
-                        _result.ErrorString.Add("Threw an error on line " + lineCount + " - " + exception.Message);
-                        _result.Success = false;
+                        _transactionImportModel.Errors.Add("Threw an error on line " + lineCount + " - " + exception.Message);
                     }
                 }
             }
+
+            return Task.CompletedTask;
         }
 
-        private void PostFile()
+        private async Task PostFileAsync()
         {
-            _result.Success = true;
+            _transactionImportModel.ImportTypeId = _importFileModel.TransactionImportTypeId;
+            _transactionImportModel.NumberOfRows = _transactionImportModel.Rows?.Count() ?? 0;
+            try
+            {
+                var result = await _transactionImportApi.TransactionImportPostAsync(_transactionImportModel);
+                if (result == null)
+                {
+                    throw new Exception("IMSApi not found to post the transactions");
+                }
+            }
+            catch (Exception exception)
+            {
+                _transactionImportModel.Errors.Add(exception.Message);
+            }
         }
+
 
         private string SetAccountReference(IEnumerable<string> row)
         {
@@ -130,26 +164,22 @@ namespace Application.Commands
 
         private string SetFundCode(string accountReference)
         {
-            if (accountReference.StartsWith("77") && accountReference.Length == 9 && accountReference.All(char.IsDigit))
+            if (accountReference.IsCouncilTax())
             {
-                return "23";
+                return _importFileModel.CouncilTaxFundCode;
             }
-            else
-            {
-                return "SP";
-            }
+            return _importFileModel.SuspenseFundCode;
+
         }
 
         private string SetVatCode(string fundcode)
         {
-            if (fundcode == "SP")
+            if (fundcode == _importFileModel.SuspenseFundCode)
             {
-                return "M0";
+                return _importFileModel.SuspenseVatCode;
             }
-            else
-            {
-                return "N0";
-            } 
+            return _importFileModel.VatCode;
+
         }
 
         private decimal SetAmount(IEnumerable<string> row)
@@ -166,11 +196,9 @@ namespace Application.Commands
             return amount;
         }
 
-        //internal static string GetNextReferenceId(Random randomGenerator)
-        //{
-        //   var hash = new Hashids("BMBC", 9);
-        //    return hash.Encode(DateTime.Now.Millisecond, randomGenerator.Next(999999));
-        //}
-
+        private void SetUpResult()
+        {
+            _result.Errors = _transactionImportModel.Errors;
+        }
     }
 }

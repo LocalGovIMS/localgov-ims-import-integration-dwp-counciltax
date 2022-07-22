@@ -7,9 +7,9 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Remove="Commands\NotificationRequest\**" />
-    <EmbeddedResource Remove="Commands\NotificationRequest\**" />
-    <None Remove="Commands\NotificationRequest\**" />
+    <Compile Remove="TestData\**" />
+    <EmbeddedResource Remove="TestData\**" />
+    <None Remove="TestData\**" />
   </ItemGroup>
 
   <ItemGroup>
@@ -37,7 +37,6 @@
 
   <ItemGroup>
     <Folder Include="Commands\" />
-    <Folder Include="TestData\" />
   </ItemGroup>
 
 </Project>
