@@ -1,4 +1,6 @@
-﻿using System.Linq;
+﻿using Application.Commands;
+using System.Collections.Generic;
+using System.Linq;
 using System.Text.RegularExpressions;
 
 namespace Application.Extensions
@@ -6,58 +8,50 @@ namespace Application.Extensions
     public static class StringExtension
     {
         private const string CouncilTaxPattern = "^7{2}[0-9]{7}$";
-        private const string OldDebtorRefPattern = "^[mMpP]{1}[0-9]{10}$";
-        private const string BenefitOverpaymentPattern = "^7{1}[0-9]{7}$";
-        private const string BusinessRatesPattern = "^56[0-9]{7}$";
-        private const string OldNonDomesticRatePattern = "^5{2}[0-9]{8}$";
-        private const string OldCouncilTaxPattern = "^70[0-9]{8}$";
-        private const string SapInvoicePattern = "^[93]{1}[0-9]{9}$";
-        private const string HousingRentsPattern = "^6{1}[0-9]{10}$";
-        private const string ParkingFinesPattern = "^[Bb]{1}[Jj]{1}[0-9]{7}[0-9Aa]$";
 
-        public static bool EqualsAnyOf(this string value, params string[] targets)
-        {
-            return targets.Any(target => target.Equals(value));
-        }
-
-        public static bool IsOldDebtorRef(this string value)
-        {
-            return Regex.IsMatch(value, OldDebtorRefPattern);
-        }
-
-        public static bool IsBenefitOverpayment(this string value)
-        {
-            return Regex.IsMatch(value, BenefitOverpaymentPattern);
-        }
+ 
         public static bool IsCouncilTax(this string value)
         {
             return Regex.IsMatch(value, CouncilTaxPattern);
         }
-        public static bool IsBusinessRates(this string value)
+
+        public static string SetFundCode(this string accountReference, ImportFileModel importFileModel)
         {
-            return Regex.IsMatch(value, BusinessRatesPattern);
-        }
-        public static bool IsOldNonDomesticRates(this string value)
-        {
-            return Regex.IsMatch(value, OldNonDomesticRatePattern);
-        }
-        public static bool IsOldCouncilTax(this string value)
-        {
-            return Regex.IsMatch(value, OldCouncilTaxPattern);
-        }
-        public static bool IsSapInvoice(this string value)
-        {
-            return Regex.IsMatch(value, SapInvoicePattern);
-        }
-        public static bool IsHousingRents(this string value)
-        {
-            return Regex.IsMatch(value, HousingRentsPattern);
+            if (accountReference.IsCouncilTax())
+            {
+                return importFileModel.CouncilTaxFundCode;
+            }
+            return importFileModel.SuspenseFundCode;
         }
 
-        public static bool IsParkingFine(this string value)
+        public static string SetVatCode(this string fundcode, ImportFileModel importFileModel)
         {
-            return Regex.IsMatch(value, ParkingFinesPattern);
+            if (fundcode == importFileModel.SuspenseFundCode)
+            {
+                return importFileModel.SuspenseVatCode;
+            }
+            return importFileModel.VatCode;
         }
 
+        public static string SetAccountReference(this IEnumerable<string> row)
+        {
+            var accountReference = row.ElementAt(5).Trim();
+            accountReference = accountReference.Replace(" ", "");
+            return accountReference;
+        }
+
+        public static decimal SetAmount(this IEnumerable<string> row)
+        {
+            decimal amount;
+            if (row.ElementAt(12).Trim() == "-")
+            {
+                amount = decimal.Parse(row.ElementAt(11).Trim()) / 100 * -1;
+            }
+            else
+            {
+                amount = decimal.Parse(row.ElementAt(11).Trim()) / 100;
+            }
+            return amount;
+        }
     }
 }
